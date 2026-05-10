@@ -7,8 +7,14 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: pacman -Sy --noconfirm openssh git
 
       - name: Set up SSH for AUR
         env:
@@ -18,22 +24,20 @@ jobs:
           echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
           ssh-keyscan -t rsa,ecdsa,ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
-          cat >> ~/.ssh/config << 'EOF'
-          Host aur.archlinux.org
-            IdentityFile ~/.ssh/aur
-            User aur
-          EOF
+          printf 'Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur\n' >> ~/.ssh/config
 
-      - name: Push to AUR
+      - name: Regenerate .SRCINFO and push to AUR
         env:
           AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
           AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
         run: |
           git clone ssh://aur@aur.archlinux.org/canto-git.git ~/aur-canto
-          cp PKGBUILD .SRCINFO canto.install ~/aur-canto/
+          cp PKGBUILD canto.install ~/aur-canto/
           cd ~/aur-canto
+          makepkg --printsrcinfo > .SRCINFO
           git config user.name "$AUR_USERNAME"
           git config user.email "$AUR_EMAIL"
           git add PKGBUILD .SRCINFO canto.install
           git diff --cached --quiet || git commit -m "Update to $GITHUB_SHA"
+          git pull --rebase origin master
           git push origin master
