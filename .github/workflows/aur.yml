@@ -29,15 +29,27 @@ jobs:
         env:
           AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
           AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
-          GIT_SSH_COMMAND: ssh -i $HOME/.ssh/aur -o UserKnownHostsFile=$HOME/.ssh/known_hosts
+          GIT_SSH_COMMAND: ssh -i /home/builder/.ssh/aur -o UserKnownHostsFile=/home/builder/.ssh/known_hosts
         run: |
-          git clone ssh://aur@aur.archlinux.org/canto-git.git "$HOME/aur-canto"
-          cp PKGBUILD canto.install "$HOME/aur-canto/"
-          cd "$HOME/aur-canto"
-          makepkg --printsrcinfo > .SRCINFO
-          git config user.name "$AUR_USERNAME"
-          git config user.email "$AUR_EMAIL"
-          git add PKGBUILD .SRCINFO canto.install
-          git diff --cached --quiet || git commit -m "Update to $GITHUB_SHA"
-          git pull --rebase origin master
-          git push origin master
+          useradd -m builder
+          cp -r "$HOME/.ssh" /home/builder/.ssh
+          chown -R builder:builder /home/builder/.ssh
+
+          GIT_SSH_COMMAND="ssh -i /home/builder/.ssh/aur -o UserKnownHostsFile=/home/builder/.ssh/known_hosts" \
+            su builder -c "git clone ssh://aur@aur.archlinux.org/canto-git.git /home/builder/aur-canto"
+
+          cp PKGBUILD canto.install /home/builder/aur-canto/
+          chown builder:builder /home/builder/aur-canto/PKGBUILD /home/builder/aur-canto/canto.install
+
+          su builder -c "
+            cd /home/builder/aur-canto
+            makepkg --printsrcinfo > .SRCINFO
+            git config user.name '$AUR_USERNAME'
+            git config user.email '$AUR_EMAIL'
+            git add PKGBUILD .SRCINFO canto.install
+            git diff --cached --quiet || git commit -m 'Update to $GITHUB_SHA'
+            GIT_SSH_COMMAND='ssh -i /home/builder/.ssh/aur -o UserKnownHostsFile=/home/builder/.ssh/known_hosts' \
+              git pull --rebase origin master
+            GIT_SSH_COMMAND='ssh -i /home/builder/.ssh/aur -o UserKnownHostsFile=/home/builder/.ssh/known_hosts' \
+              git push origin master
+          "
