@@ -20,20 +20,20 @@ jobs:
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
-          mkdir -p ~/.ssh
-          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          ssh-keyscan -t rsa,ecdsa,ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
-          printf 'Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur\n' >> ~/.ssh/config
+          mkdir -p "$HOME/.ssh"
+          echo "$AUR_SSH_PRIVATE_KEY" > "$HOME/.ssh/aur"
+          chmod 600 "$HOME/.ssh/aur"
+          ssh-keyscan -t rsa,ecdsa,ed25519 aur.archlinux.org >> "$HOME/.ssh/known_hosts" 2>/dev/null
 
       - name: Regenerate .SRCINFO and push to AUR
         env:
           AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
           AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+          GIT_SSH_COMMAND: ssh -i $HOME/.ssh/aur -o UserKnownHostsFile=$HOME/.ssh/known_hosts
         run: |
-          git clone ssh://aur@aur.archlinux.org/canto-git.git ~/aur-canto
-          cp PKGBUILD canto.install ~/aur-canto/
-          cd ~/aur-canto
+          git clone ssh://aur@aur.archlinux.org/canto-git.git "$HOME/aur-canto"
+          cp PKGBUILD canto.install "$HOME/aur-canto/"
+          cd "$HOME/aur-canto"
           makepkg --printsrcinfo > .SRCINFO
           git config user.name "$AUR_USERNAME"
           git config user.email "$AUR_EMAIL"
