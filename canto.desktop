@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Canto
+Comment=EPUB reader with offline TTS and Spotify-style lyrics view
+Exec=canto %f
+Icon=canto
+Terminal=false
+Type=Application
+Categories=Office;Viewer;Literature;
+MimeType=application/epub+zip;
+Keywords=epub;book;reader;tts;audiobook;
