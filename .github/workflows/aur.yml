@@ -7,20 +7,33 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    env:
-      COMMIT_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Publish to AUR
-        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
-        with:
-          pkgname: canto-git
-          pkgbuild: ./PKGBUILD
-          commit_username: ${{ secrets.AUR_USERNAME }}
-          commit_email: ${{ secrets.AUR_EMAIL }}
-          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "Update to ${{ env.COMMIT_SHA }}"
-          force_push: true
+      - name: Set up SSH for AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t rsa,ecdsa,ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+          cat >> ~/.ssh/config << 'EOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+          EOF
+
+      - name: Push to AUR
+        env:
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+        run: |
+          git clone ssh://aur@aur.archlinux.org/canto-git.git ~/aur-canto
+          cp PKGBUILD .SRCINFO canto.install ~/aur-canto/
+          cd ~/aur-canto
+          git config user.name "$AUR_USERNAME"
+          git config user.email "$AUR_EMAIL"
+          git add PKGBUILD .SRCINFO canto.install
+          git diff --cached --quiet || git commit -m "Update to $GITHUB_SHA"
+          git push origin master
