@@ -109,7 +109,6 @@ class ReadingController:
                 break
 
             self._prefetch_next(self._idx + 1)
-            self._prefetch_next(self._idx + 2)
 
             my_gen = self._gen
             self._advance_event.clear()

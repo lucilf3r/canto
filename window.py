@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from epub_parser import EpubParser, ContentBlock
-from tts_engine import TTSEngine, VOICES
+from tts_engine import TTSEngine
 from controller import ReadingController
 
 
@@ -396,8 +396,8 @@ class MainWindow(QMainWindow):
         self._play_btn.clicked.connect(self._toggle_play)
 
         self._voice_combo = QComboBox()
-        self._voice_combo.addItems(VOICES)
-        self._voice_combo.setCurrentText('af_bella')
+        self._voice_combo.addItems(self.tts.voices)
+        self._voice_combo.setCurrentText(self.tts.voice)
         self._voice_combo.setStyleSheet(COMBO)
         self._voice_combo.currentTextChanged.connect(self._on_voice_change)
 
@@ -406,7 +406,7 @@ class MainWindow(QMainWindow):
         self._speed_val = QLabel('1.0×')
         self._speed_val.setStyleSheet(SMALL_LBL + ' min-width:32px;')
         spd = QSlider(Qt.Orientation.Horizontal)
-        spd.setRange(5, 25)
+        spd.setRange(7, 20)
         spd.setValue(10)
         spd.setMaximumWidth(110)
         spd.setStyleSheet(SLIDER)

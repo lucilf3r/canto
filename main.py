@@ -3,43 +3,20 @@ import sys
 import os
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
-MODEL_DIR = Path(__file__).parent / 'models'
-MODEL_PATH = MODEL_DIR / 'kokoro-v0_19.onnx'
-VOICES_PATH = MODEL_DIR / 'voices.bin'
-
-
-def _check_models() -> list[str]:
-    missing = []
-    if not MODEL_PATH.exists():
-        missing.append('models/kokoro-v0_19.onnx')
-    if not VOICES_PATH.exists():
-        missing.append('models/voices.bin')
-    return missing
+_BUNDLED_MODEL = Path(__file__).parent / 'models' / 'supertonic-3'
 
 
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName('Canto')
 
-    missing = _check_models()
-    if missing:
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Icon.Critical)
-        msg.setWindowTitle('Missing model files')
-        msg.setText(
-            'Kokoro model files are missing:\n\n'
-            + '\n'.join(f'  - {f}' for f in missing)
-            + '\n\nRun setup first:\n\n    bash setup.sh'
-        )
-        msg.exec()
-        sys.exit(1)
-
     from tts_engine import TTSEngine
     from window import MainWindow
 
-    tts = TTSEngine(str(MODEL_PATH), str(VOICES_PATH))
+    model_dir = _BUNDLED_MODEL if _BUNDLED_MODEL.exists() else None
+    tts = TTSEngine(model_dir=model_dir)
     win = MainWindow(tts)
     win.show()
 

@@ -1,39 +1,26 @@
-import os
+from pathlib import Path
 
 import numpy as np
-import onnxruntime as ort
-from kokoro_onnx import Kokoro
-
-VOICES = [
-    'af', 'af_bella', 'af_nicole', 'af_sarah', 'af_sky',
-    'am_adam', 'am_michael',
-    'bf_emma', 'bf_isabella',
-    'bm_george', 'bm_lewis',
-]
-
-# Use half the available cores for inference so TTS doesn't monopolise the CPU
-_INTRA_THREADS = max(1, (os.cpu_count() or 4) // 2)
+from supertonic import TTS
 
 
 class TTSEngine:
-    def __init__(self, model_path: str, voices_path: str):
-        opts = ort.SessionOptions()
-        opts.intra_op_num_threads = _INTRA_THREADS
-        opts.inter_op_num_threads = 1
-        sess = ort.InferenceSession(
-            model_path,
-            sess_options=opts,
-            providers=['CPUExecutionProvider'],
-        )
-        self._kokoro = Kokoro.from_session(sess, voices_path)
-        self.voice: str = 'af_bella'
-        self.speed: float = 1.0
+    def __init__(self, model_dir: Path | None = None):
+        self._tts = TTS(auto_download=True, model_dir=model_dir, intra_op_num_threads=2)
+        self.voices: list[str] = self._tts.voice_style_names
+        self.speed: float = 1.05
+        self._voice: str = self.voices[0]
+        self._style = self._tts.get_voice_style(self._voice)
+
+    @property
+    def voice(self) -> str:
+        return self._voice
+
+    @voice.setter
+    def voice(self, name: str):
+        self._voice = name
+        self._style = self._tts.get_voice_style(name)
 
     def generate(self, text: str) -> tuple[np.ndarray, int]:
-        samples, sample_rate = self._kokoro.create(
-            text,
-            voice=self.voice,
-            speed=self.speed,
-            lang='en-us',
-        )
-        return np.asarray(samples, dtype=np.float32), int(sample_rate)
+        wav, _ = self._tts.synthesize(text, self._style, speed=self.speed)
+        return wav[0], self._tts.sample_rate
