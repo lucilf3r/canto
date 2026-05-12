@@ -3,8 +3,9 @@ __pycache__/
 *.py[cod]
 *.pyo
 .venv/
+lib/
 
-# Kokoro model files (large, downloaded by setup.sh)
+# Model files (large, downloaded by setup.sh or PKGBUILD)
 models/
 
 # OS
