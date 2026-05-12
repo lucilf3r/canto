@@ -24,9 +24,7 @@ class ReadingController:
         self._idx: int = 0
         self._state: str = 'stopped'
 
-        # Generation counter: incremented on every stop(). Callbacks capture
-        # their generation at creation; if it doesn't match current, they're stale.
-        self._gen: int = 0
+        self._gen: int = 0  # incremented on stop(); stale callbacks are those whose captured gen ≠ current
 
         self._stop_event = threading.Event()
         self._advance_event = threading.Event()
@@ -36,8 +34,6 @@ class ReadingController:
         self._fetching: set[int] = set()
 
         self._player = AudioPlayer()
-
-    # ── Public API ──────────────────────────────────────────────────────────
 
     def play(self):
         if self._state == 'playing':
@@ -89,8 +85,6 @@ class ReadingController:
     def state(self) -> str:
         return self._state
 
-    # ── Internal ─────────────────────────────────────────────────────────────
-
     def _set_state(self, state: str):
         self._state = state
         self._on_state_change(state)
@@ -115,8 +109,8 @@ class ReadingController:
                 break
 
             self._prefetch_next(self._idx + 1)
+            self._prefetch_next(self._idx + 2)
 
-            # Capture generation for this specific play call
             my_gen = self._gen
             self._advance_event.clear()
             self._player.play(
@@ -132,7 +126,6 @@ class ReadingController:
             self._set_state('stopped')
 
     def _on_audio_done(self, gen: int):
-        # Only advance if this callback belongs to the current generation
         if gen == self._gen:
             self._advance_event.set()
 

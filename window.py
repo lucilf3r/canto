@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
-
 import threading
 
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QRect, QPoint, QEvent, QSize
-from PySide6.QtGui import QPixmap, QImage, QColor, QPalette, QCursor, QKeySequence, QShortcut
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QPixmap, QImage, QColor, QPalette, QCursor, QKeySequence, QShortcut, QFont
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QSlider, QFileDialog, QSizePolicy, QComboBox,
@@ -99,12 +96,11 @@ QPushButton[active=true] {{
 class _Bridge(QObject):
     block_changed = Signal(int)
     state_changed = Signal(str)
-    epub_loaded   = Signal(object)   # carries the EpubParser result back to the UI thread
+    epub_loaded   = Signal(object)
     epub_error    = Signal(str)
 
 
 class ClickableLabel(QLabel):
-    """QLabel that emits clicked() on left-click."""
     clicked = Signal()
 
     def __init__(self, *args, **kwargs):
@@ -118,8 +114,6 @@ class ClickableLabel(QLabel):
 
 
 class HScrollArea(QScrollArea):
-    """Horizontal-only scroll area; mouse wheel scrolls left/right."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -130,8 +124,7 @@ class HScrollArea(QScrollArea):
         )
 
     def wheelEvent(self, event):
-        # Prefer explicit horizontal delta (two-finger horizontal swipe on trackpad).
-        # Fall back to vertical wheel/swipe converted to horizontal scroll.
+        # horizontal delta is preferred (trackpad swipe); fall back to vertical wheel
         dx = event.angleDelta().x()
         dy = event.angleDelta().y()
         delta = dx if dx != 0 else dy
@@ -142,18 +135,15 @@ class HScrollArea(QScrollArea):
 # ── Full-screen image viewer ──────────────────────────────────────────────────
 
 class ImageFullscreenOverlay(QWidget):
-    """Frameless full-screen overlay for inspecting book images.
-    Dismissed by pressing F, Escape, or clicking anywhere."""
-
     def __init__(self):
-        super().__init__(None)  # top-level, no parent
+        super().__init__(None)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.Tool,
         )
         self.setStyleSheet('background: #000;')
-        self._current_data: Optional[bytes] = None
+        self._current_data: bytes | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -207,7 +197,7 @@ class MainWindow(QMainWindow):
     def __init__(self, tts: TTSEngine):
         super().__init__()
         self.tts = tts
-        self.controller: Optional[ReadingController] = None
+        self.controller: ReadingController | None = None
         self.blocks: list[ContentBlock] = []
         self._chapters: list[tuple[str, int]] = []
         self._chapter_btns: list[QPushButton] = []
@@ -215,7 +205,7 @@ class MainWindow(QMainWindow):
         self._bridge = _Bridge()
         self._slider_locked = False
 
-        self.setWindowTitle('Ebook Reader')
+        self.setWindowTitle('Canto')
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
         self.resize(440, 600)
         self.setStyleSheet(GLOBAL_STYLE)
@@ -232,13 +222,12 @@ class MainWindow(QMainWindow):
         self._hide_timer.setSingleShot(True)
         self._hide_timer.setInterval(2000)
         self._hide_timer.timeout.connect(self._hide_controls)
-
         self._install_hover_tracking(self)
         self._top_overlay.hide()
         self._bot_overlay.hide()
 
         self._img_viewer = ImageFullscreenOverlay()
-        self._current_image_data: Optional[bytes] = None
+        self._current_image_data: bytes | None = None
 
         QShortcut(QKeySequence('Space'), self).activated.connect(self._toggle_play)
         QShortcut(QKeySequence('F'),     self).activated.connect(self._toggle_image_fullscreen)
@@ -249,7 +238,6 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
 
-        # ── Text area (fills whole central widget) ──
         self._text_widget = QWidget(central)
         tv = QVBoxLayout(self._text_widget)
         tv.setContentsMargins(0, 0, 0, 0)
@@ -275,7 +263,6 @@ class MainWindow(QMainWindow):
             self._text_labels.append(lbl)
             tv.addWidget(lbl)
 
-        # ── Media panel: image / code / table stacked widget ──────────────────
         self._media_panel = QWidget(central)
         self._media_panel.setStyleSheet('background: #161b22; border-radius: 8px;')
         mp_layout = QVBoxLayout(self._media_panel)
@@ -355,7 +342,6 @@ class MainWindow(QMainWindow):
 
         self._media_panel.setVisible(False)
 
-        # ── Top overlay: title + open button ──
         self._top_overlay = QWidget(central)
         self._top_overlay.setStyleSheet(OVERLAY_TOP)
         th = QHBoxLayout(self._top_overlay)
@@ -371,14 +357,12 @@ class MainWindow(QMainWindow):
         th.addWidget(self._title_lbl, stretch=1)
         th.addWidget(open_btn)
 
-        # ── Bottom overlay: chapters + progress + controls ──
         self._bot_overlay = QWidget(central)
         self._bot_overlay.setStyleSheet(OVERLAY_BOT)
         bv = QVBoxLayout(self._bot_overlay)
         bv.setContentsMargins(20, 16, 20, 14)
         bv.setSpacing(8)
 
-        # Chapter scroll row
         self._chapter_scroll = HScrollArea()
         self._chapter_scroll.setFixedHeight(32)
         self._chapter_inner = QWidget()
@@ -392,7 +376,6 @@ class MainWindow(QMainWindow):
         self._chapter_scroll.setWidget(self._chapter_inner)
         bv.addWidget(self._chapter_scroll)
 
-        # Per-chapter progress slider
         self._progress = QSlider(Qt.Orientation.Horizontal)
         self._progress.setRange(0, 1)
         self._progress.setValue(0)
@@ -401,7 +384,6 @@ class MainWindow(QMainWindow):
         self._progress.sliderReleased.connect(self._on_seek)
         bv.addWidget(self._progress)
 
-        # Controls row
         cr = QWidget()
         cr.setStyleSheet('background:transparent;')
         ch = QHBoxLayout(cr)
@@ -447,10 +429,9 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         self._do_layout()
 
-    # Layout constants
-    _IMG_H   = 190   # image panel height when visible
-    _BOT_H   = 152   # bottom overlay height (chapters + progress + controls)
-    _TOP_H   =  58   # top overlay height
+    _IMG_H = 190
+    _BOT_H = 152
+    _TOP_H =  58
 
     def _do_layout(self):
         w, h = self.width(), self.height()
@@ -459,7 +440,6 @@ class MainWindow(QMainWindow):
         text_h = h - (self._IMG_H + 12 if media_visible else 0) - self._BOT_H
         self._text_widget.setGeometry(0, 0, w, max(text_h, 200))
 
-        # Media panel: full width minus padding, between text and bottom overlay
         med_w = w - 32
         med_x = 16
         med_y = h - self._BOT_H - self._IMG_H - 8
@@ -553,7 +533,6 @@ class MainWindow(QMainWindow):
     # ── Chapter helpers ───────────────────────────────────────────────────────
 
     def _populate_chapters(self):
-        # Clear old buttons
         while self._chapter_inner_layout.count():
             item = self._chapter_inner_layout.takeAt(0)
             if item.widget():
@@ -578,7 +557,6 @@ class MainWindow(QMainWindow):
             self.controller.seek(start)
 
     def _find_current_chapter(self, block_idx: int) -> int:
-        """Binary search for the chapter index containing block_idx."""
         lo, hi, result = 0, len(self._chapters) - 1, 0
         while lo <= hi:
             mid = (lo + hi) // 2
@@ -607,18 +585,14 @@ class MainWindow(QMainWindow):
         ch = self._find_current_chapter(block_idx)
         start, end = self._chapter_range(ch)
 
-        # Update active chapter pill
         if ch != self._current_chapter_idx:
             self._current_chapter_idx = ch
             for i, btn in enumerate(self._chapter_btns):
                 btn.setProperty('active', i == ch)
                 btn.style().unpolish(btn)
                 btn.style().polish(btn)
-            # Scroll chapter row to show active pill
-            if ch < len(self._chapter_btns):
-                self._chapter_scroll.ensureWidgetVisible(self._chapter_btns[ch])
+            self._chapter_scroll.ensureWidgetVisible(self._chapter_btns[ch])
 
-        # Update progress bar for this chapter
         self._slider_locked = True
         self._progress.setRange(0, max(1, end - start - 1))
         self._progress.setValue(block_idx - start)
@@ -728,14 +702,15 @@ class MainWindow(QMainWindow):
             self._media_panel.setVisible(False)
             self._do_layout()
 
-    def _fill_table(self, block):
-        rows = block.table_rows or []
+    def _fill_table(self, block: ContentBlock) -> None:
+        rows = block.table_rows
         if not rows:
             return
         n_cols = max(len(r) for r in rows)
-        data, headers = rows, []
+        data = rows
+        headers: list[str] = []
 
-        if block.table_has_header and rows:
+        if block.table_has_header:
             headers = rows[0]
             data = rows[1:]
 

@@ -1,9 +1,7 @@
 import os
 import re
-from dataclasses import dataclass, field
-from typing import Optional
-
 import warnings
+from dataclasses import dataclass
 
 import ebooklib
 from ebooklib import epub
@@ -14,11 +12,11 @@ warnings.filterwarnings('ignore', category=XMLParsedAsHTMLWarning)
 
 @dataclass
 class ContentBlock:
-    type: str           # 'text' | 'image' | 'code' | 'table'
-    content: str        # sentence text, image href, raw code text, or ''
-    image_data: Optional[bytes] = None
+    type: str
+    content: str
+    image_data: bytes | None = None
     image_mime: str = ''
-    table_rows: Optional[list[list[str]]] = None   # all rows (header first if present)
+    table_rows: list[list[str]] | None = None
     table_has_header: bool = False
 
 
@@ -29,8 +27,8 @@ class EpubParser:
     def __init__(self, filepath: str):
         self.book = epub.read_epub(filepath, options={'ignore_ncx': True})
         self.blocks: list[ContentBlock] = []
-        self.chapters: list[tuple[str, int]] = []   # (title, first_block_idx)
-        self._doc_start: dict[str, int] = {}        # file_name → block idx at parse time
+        self.chapters: list[tuple[str, int]] = []
+        self._doc_start: dict[str, int] = {}
         self._parse()
         self._build_chapters()
 
@@ -118,7 +116,7 @@ class EpubParser:
                 result.append((getattr(item, 'title', '') or 'Chapter', item.href or ''))
         return result
 
-    def _resolve_href(self, href: str) -> Optional[int]:
+    def _resolve_href(self, href: str) -> int | None:
         doc = href.split('#')[0].strip('/')
         basename = os.path.basename(doc)
         if doc in self._doc_start:
@@ -144,7 +142,6 @@ class EpubParser:
             ))
 
 
-# ── Table & sentence helpers ──────────────────────────────────────────────────
 
 def _parse_table(table_tag: Tag) -> tuple[list[list[str]], bool]:
     rows: list[list[str]] = []

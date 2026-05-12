@@ -1,24 +1,21 @@
 import threading
-from typing import Callable, Optional
+from typing import Callable
 
 import numpy as np
 import sounddevice as sd
 
 
 class AudioPlayer:
-    """Callback-based audio player. Each play() call takes its own on_done callback
-    so stale callbacks from stopped streams can never fire for a new play session."""
-
     def __init__(self):
-        self._data: Optional[np.ndarray] = None
+        self._data: np.ndarray | None = None
         self._sr: int = 24000
         self._pos: int = 0
         self._paused: bool = False
-        self._stream: Optional[sd.OutputStream] = None
-        self._on_done: Optional[Callable] = None
+        self._stream: sd.OutputStream | None = None
+        self._on_done: Callable | None = None
         self._lock = threading.Lock()
 
-    def play(self, data: np.ndarray, sr: int, on_done: Optional[Callable] = None):
+    def play(self, data: np.ndarray, sr: int, on_done: Callable | None = None):
         self.stop()  # nulls _on_done before old finished_callback fires
         with self._lock:
             self._data = np.ascontiguousarray(data, dtype=np.float32)

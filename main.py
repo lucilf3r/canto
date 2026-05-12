@@ -21,7 +21,7 @@ def _check_models() -> list[str]:
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName('Ebook Reader')
+    app.setApplicationName('Canto')
 
     missing = _check_models()
     if missing:
