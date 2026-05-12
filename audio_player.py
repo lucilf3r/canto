@@ -5,6 +5,16 @@ import numpy as np
 import sounddevice as sd
 
 
+def _output_device() -> str | None:
+    # Prefer the PipeWire/PulseAudio mixer so multiple apps can play simultaneously.
+    # Falls back to the system default if neither is available.
+    names = {d['name'] for d in sd.query_devices()}
+    for preferred in ('pulse', 'pipewire'):
+        if preferred in names:
+            return preferred
+    return None
+
+
 class AudioPlayer:
     def __init__(self):
         self._data: np.ndarray | None = None
@@ -27,6 +37,7 @@ class AudioPlayer:
             samplerate=sr,
             channels=1,
             dtype='float32',
+            device=self._output_device(),
             latency='high',
             callback=self._callback,
             finished_callback=self._on_stream_done,
