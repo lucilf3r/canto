@@ -27,6 +27,7 @@ class AudioPlayer:
             samplerate=sr,
             channels=1,
             dtype='float32',
+            latency='high',
             callback=self._callback,
             finished_callback=self._on_stream_done,
         )
