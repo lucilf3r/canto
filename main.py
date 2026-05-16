@@ -18,14 +18,17 @@ def main():
     model_dir = _BUNDLED_MODEL if _BUNDLED_MODEL.exists() else None
     tts = TTSEngine(model_dir=model_dir)
     win = MainWindow(tts)
-    win.show()
 
     if len(sys.argv) > 1:
         epub_path = sys.argv[1]
         if os.path.isfile(epub_path):
+            win.show()
             win.load_epub(epub_path)
         else:
             print(f'Warning: file not found: {epub_path}', file=sys.stderr)
+            win.show_library()
+    else:
+        win.show_library()
 
     sys.exit(app.exec())
 

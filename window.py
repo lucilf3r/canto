@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import os
 import threading
+from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QRect, QPoint, QEvent, QSize
 from PySide6.QtGui import QPixmap, QImage, QColor, QPalette, QCursor, QKeySequence, QShortcut, QFont
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QSlider, QFileDialog, QSizePolicy, QComboBox,
-    QScrollArea, QStackedWidget, QPlainTextEdit,
+    QScrollArea, QStackedWidget, QPlainTextEdit, QFrame, QProgressBar,
     QTableWidget, QTableWidgetItem, QHeaderView,
 )
 
 from epub_parser import EpubParser, ContentBlock
+from library import Library
 from tts_engine import TTSEngine
 from controller import ReadingController
 
@@ -191,6 +193,243 @@ class ImageFullscreenOverlay(QWidget):
         self.hide()
 
 
+# ── Library ───────────────────────────────────────────────────────────────────
+
+_COLS      = 3
+_CARD_W    = 118
+_COVER_H   = 158   # ~3:4 ratio
+_TITLE_H   =  48
+_CARD_H    = _COVER_H + _TITLE_H
+
+
+class _BookCard(QWidget):
+    clicked = Signal(str)
+
+    def __init__(self, path: str, info: dict, library: Library, parent=None):
+        super().__init__(parent)
+        self._path = path
+        self.setFixedSize(_CARD_W, _CARD_H)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ── Cover ──
+        self._cover = QLabel()
+        self._cover.setFixedSize(_CARD_W, _COVER_H)
+        self._cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._set_cover_placeholder(info)
+        cover_path = library.cover_path(path)
+        if cover_path:
+            self._load_cover(cover_path)
+        root.addWidget(self._cover)
+
+        # ── Progress bar pinned to bottom of cover ──
+        block = info.get('block', 0)
+        total = info.get('total', 0)
+        if total > 0 and block > 0:
+            bar = QProgressBar(self._cover)
+            bar.setRange(0, 100)
+            bar.setValue(int(block / total * 100))
+            bar.setTextVisible(False)
+            bar.setGeometry(0, _COVER_H - 4, _CARD_W, 4)
+            bar.setStyleSheet(
+                'QProgressBar { background:rgba(0,0,0,80); border:none; }'
+                f'QProgressBar::chunk {{ background:{ACCENT}; }}'
+            )
+
+        # ── Title strip ──
+        info_w = QWidget()
+        info_w.setFixedSize(_CARD_W, _TITLE_H)
+        tl = QVBoxLayout(info_w)
+        tl.setContentsMargins(4, 5, 4, 4)
+        tl.setSpacing(0)
+        title = info.get('title') or Path(path).stem
+        lbl = QLabel(title)
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet('color:#e0e0e0; font-size:10px; font-weight:600;')
+        lbl.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        tl.addWidget(lbl)
+        root.addWidget(info_w)
+
+    def _set_cover_placeholder(self, info: dict):
+        title = info.get('title', '')
+        initial = (title[:2] if title else '??').upper()
+        self._cover.setText(initial)
+        self._cover.setStyleSheet(
+            'background: qlineargradient(x1:0,y1:0,x2:0,y2:1,'
+            '  stop:0 #21262d, stop:1 #161b22);'
+            'color: rgba(255,255,255,70);'
+            'font-size: 26px; font-weight: bold;'
+            'border-radius: 6px;'
+        )
+
+    def _load_cover(self, cover_path: Path):
+        px = QPixmap(str(cover_path))
+        if px.isNull():
+            return
+        px = px.scaled(
+            _CARD_W, _COVER_H,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        # centre-crop to exact card size
+        x = (px.width()  - _CARD_W)  // 2
+        y = (px.height() - _COVER_H) // 2
+        self._cover.setPixmap(px.copy(x, y, _CARD_W, _COVER_H))
+        self._cover.setStyleSheet('border-radius: 6px;')
+
+    def enterEvent(self, event):
+        self._cover.setStyleSheet(
+            self._cover.styleSheet().rstrip(';') +
+            f'; border: 2px solid {ACCENT};'
+        )
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        # strip any border added on enter
+        style = self._cover.styleSheet()
+        style = '; '.join(
+            p for p in style.split(';') if 'border' not in p
+        ).strip('; ')
+        self._cover.setStyleSheet(style)
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self._path)
+        super().mousePressEvent(event)
+
+
+class LibraryWindow(QWidget):
+    book_selected  = Signal(str)
+    _covers_ready  = Signal()   # internal — triggers grid refresh
+
+    def __init__(self, library: Library, parent=None):
+        super().__init__(parent)
+        self._library = library
+        self.setWindowTitle('Canto Library')
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
+        self.resize(420, 580)
+        self.setStyleSheet(GLOBAL_STYLE)
+        self._build()
+
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(120)
+        self._covers_ready.connect(lambda: self._refresh_timer.start())
+        self._refresh_timer.timeout.connect(self.refresh)
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        header = QHBoxLayout()
+        hdr_lbl = QLabel('YOUR LIBRARY')
+        hdr_lbl.setStyleSheet(
+            f'color:{ACCENT}; font-size:11px; font-weight:bold; letter-spacing:1.5px;'
+        )
+        add_btn = QPushButton('+ Add Folder')
+        add_btn.setStyleSheet(BTN)
+        add_btn.clicked.connect(self._add_folder)
+        header.addWidget(hdr_lbl)
+        header.addStretch()
+        header.addWidget(add_btn)
+        layout.addLayout(header)
+
+        self._empty_lbl = QLabel('No books yet.\nAdd an EPUB folder to get started.')
+        self._empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_lbl.setStyleSheet('color:rgba(255,255,255,50); font-size:13px;')
+        layout.addWidget(self._empty_lbl, stretch=1)
+
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setStyleSheet(
+            'QScrollArea { background:transparent; border:none; }'
+            'QScrollBar:vertical { width:6px; background:transparent; }'
+            'QScrollBar::handle:vertical { background:rgba(255,255,255,35); border-radius:3px; }'
+        )
+        self._grid_widget = QWidget()
+        self._grid = None   # rebuilt in refresh()
+        self._scroll.setWidget(self._grid_widget)
+        layout.addWidget(self._scroll, stretch=1)
+
+    def refresh(self):
+        # Clear existing cards (keep the layout, only created once)
+        if self._grid is None:
+            from PySide6.QtWidgets import QGridLayout
+            self._grid = QGridLayout(self._grid_widget)
+            self._grid.setContentsMargins(0, 0, 0, 0)
+            self._grid.setHorizontalSpacing(10)
+            self._grid.setVerticalSpacing(14)
+            self._grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        else:
+            while self._grid.count():
+                item = self._grid.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+
+        visible = [
+            (p, info)
+            for p, info in self._library.books.items()
+            if Path(p).exists()
+        ]
+        visible.sort(key=lambda x: x[1].get('last_read', 0), reverse=True)
+
+        if not visible:
+            self._scroll.hide()
+            self._empty_lbl.show()
+            return
+
+        self._empty_lbl.hide()
+        self._scroll.show()
+
+        for idx, (path, info) in enumerate(visible):
+            card = _BookCard(path, info, self._library)
+            card.clicked.connect(self._on_book_clicked)
+            self._grid.addWidget(card, idx // _COLS, idx % _COLS)
+
+        # Fetch missing covers in background
+        missing = [p for p, _ in visible if not self._library.cover_path(p)]
+        if missing:
+            threading.Thread(
+                target=self._fetch_covers,
+                args=(missing,),
+                daemon=True,
+            ).start()
+
+    def _fetch_covers(self, paths: list[str]):
+        from library import _extract_epub_cover
+        any_cached = False
+        for path in paths:
+            data = _extract_epub_cover(path)
+            if data:
+                self._library.cache_cover(path, data)
+                any_cached = True
+        if any_cached:
+            self._covers_ready.emit()
+
+    def _on_book_clicked(self, path: str):
+        self.book_selected.emit(path)
+        self.hide()
+
+    def _add_folder(self):
+        folder = QFileDialog.getExistingDirectory(
+            self, 'Select EPUB Folder', os.path.expanduser('~')
+        )
+        if folder:
+            self._library.add_folder(folder)
+            self.refresh()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.hide()
+        else:
+            super().keyPressEvent(event)
+
+
 # ── Main window ───────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
@@ -228,6 +467,14 @@ class MainWindow(QMainWindow):
 
         self._img_viewer = ImageFullscreenOverlay()
         self._current_image_data: bytes | None = None
+
+        self._library = Library()
+        self._current_epub: str | None = None
+        self._lib_win = LibraryWindow(self._library)
+        self._lib_win.book_selected.connect(self._on_book_from_library)
+        self._save_timer = QTimer(self)
+        self._save_timer.setInterval(60_000)
+        self._save_timer.timeout.connect(self._save_progress)
 
         QShortcut(QKeySequence('Space'), self).activated.connect(self._toggle_play)
         QShortcut(QKeySequence('F'),     self).activated.connect(self._toggle_image_fullscreen)
@@ -354,7 +601,11 @@ class MainWindow(QMainWindow):
         open_btn.setObjectName('open')
         open_btn.setStyleSheet(BTN)
         open_btn.clicked.connect(self._open_file)
+        lib_btn = QPushButton('Library')
+        lib_btn.setStyleSheet(BTN)
+        lib_btn.clicked.connect(self._open_library)
         th.addWidget(self._title_lbl, stretch=1)
+        th.addWidget(lib_btn)
         th.addWidget(open_btn)
 
         self._bot_overlay = QWidget(central)
@@ -492,6 +743,8 @@ class MainWindow(QMainWindow):
             self.load_epub(path)
 
     def load_epub(self, path: str):
+        self._save_progress()
+        self._current_epub = path
         if self.controller:
             self.controller.stop()
         self._play_btn.setEnabled(False)
@@ -512,7 +765,8 @@ class MainWindow(QMainWindow):
             self._title_lbl.setText('Could not parse EPUB')
             return
         meta = parser.book.get_metadata('DC', 'title')
-        self._title_lbl.setText((meta[0][0] if meta else '').upper())
+        title = meta[0][0] if meta else ''
+        self._title_lbl.setText(title.upper())
         self._chapters = parser.chapters
         self._current_chapter_idx = 0
         self.controller = ReadingController(
@@ -521,14 +775,55 @@ class MainWindow(QMainWindow):
             on_block_change=self._bridge.block_changed.emit,
             on_state_change=self._bridge.state_changed.emit,
         )
+        if self._current_epub:
+            self._library.register_book(self._current_epub, title, len(self.blocks))
         self._populate_chapters()
         self._progress.setEnabled(True)
         self._play_btn.setEnabled(True)
-        self._update_display(0)
-        self._update_chapter_progress(0)
+        saved = self._library.get_progress(self._current_epub) if self._current_epub else 0
+        start_idx = min(saved, len(self.blocks) - 1) if saved > 0 else 0
+        if start_idx > 0:
+            self.controller.seek(start_idx)
+        self._update_display(start_idx)
+        self._update_chapter_progress(start_idx)
+        self._save_timer.start()
 
     def _on_epub_error(self, msg: str):
         self._title_lbl.setText(f'Error: {msg}')
+
+    def show_library(self):
+        self._lib_win.refresh()
+        self._lib_win.show()
+        self._lib_win.raise_()
+        self._lib_win.activateWindow()
+
+    def _on_book_from_library(self, path: str):
+        if not self.isVisible():
+            self.show()
+        self.raise_()
+        self.activateWindow()
+        self.load_epub(path)
+
+    def _open_library(self):
+        self._save_progress()
+        self._lib_win.refresh()
+        main_geo = self.frameGeometry()
+        screen_w = QApplication.primaryScreen().geometry().width()
+        x = main_geo.right() + 8
+        if x + self._lib_win.width() > screen_w:
+            x = max(0, main_geo.left() - self._lib_win.width() - 8)
+        self._lib_win.move(x, main_geo.top())
+        self._lib_win.show()
+        self._lib_win.raise_()
+        self._lib_win.activateWindow()
+
+    def _save_progress(self):
+        if self.controller and self._current_epub:
+            self._library.set_progress(self._current_epub, self.controller.current_index)
+
+    def closeEvent(self, event):
+        self._save_progress()
+        super().closeEvent(event)
 
     # ── Chapter helpers ───────────────────────────────────────────────────────
 
@@ -612,6 +907,7 @@ class MainWindow(QMainWindow):
             return
         if self.controller.state == 'playing':
             self.controller.pause()
+            self._save_progress()
         else:
             self.controller.play()
 
